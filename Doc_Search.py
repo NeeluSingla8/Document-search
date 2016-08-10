@@ -19,7 +19,8 @@ my_cse_id = "Your CSE ID"
 stoppath = "SmartStoplist.txt"
 
 #set directory for the files
-os.chdir("C:\USC stuff\MOSIS\Test_Files")
+my_directory = "C:\USC stuff\MOSIS\Test_Files"
+os.chdir(my_directory)
 
 #module to convert pdf to text
 def convert(fname):
