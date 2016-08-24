@@ -1,117 +1,82 @@
-import glob, os
-import io
-import unicodedata
-import re
+import sys
 import rake
-
-from cStringIO import StringIO
-from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
-from pdfminer.converter import TextConverter
-from pdfminer.layout import LAParams
-from pdfminer.pdfpage import PDFPage
+import re
+import mysql.connector
+import os
 from googleapiclient.discovery import build
+from PyPDF2 import PdfFileWriter, PdfFileReader
+import datetime
+import time
 
-#set Google API key and Custom Search Engine ID
-my_api_key = "Your API key"
-my_cse_id = "Your CSE ID"
+my_api_key = "AIzaSyBX7n9j5SfCBxOLtWGsE4SwmMMdQOD7sdY"
+my_cse_id = "001888581548700543885:hcpwduckiys"
 
-#initialize the stopwords list
-stoppath = "SmartStoplist.txt"
-
-#set directory for the files
-my_directory = "C:\USC stuff\MOSIS\Test_Files"
-os.chdir(my_directory)
-
-#module to convert pdf to text
-def convert(fname):
-    codec = 'utf-8'
-    output = StringIO()
-    manager = PDFResourceManager()
-    converter = TextConverter(manager, output, codec=codec, laparams=LAParams())
-    interpreter = PDFPageInterpreter(manager, converter)
-    count = 0
-    infile = file(fname, 'rb')
-    for page in PDFPage.get_pages(infile):
-        interpreter.process_page(page)
-        count = count + 1
-    infile.close()
-    converter.close()
-    text = output.getvalue()
-    output.close
-    return text, count
-
-#module to implement rake
-def rake_call(final_string, page_no):
-    min_chars = 5
-    max_words = 5
-    if page_no <= 10:
-        min_freq = 2
-    elif page_no <= 30:
-        min_freq = 3
-    elif page_no <= 100:
-        min_freq = 4
-    else:
-        min_freq = 8
-    
-    rake_object = rake.Rake(stoppath, min_chars, max_words, min_freq)
-#   print "Rake call: (stoppath, %s, %s, %s )" % (min_chars, max_words, min_freq) 
-    keywords = rake_object.run(final_string)
-    return post_process(keywords)
-
-#module to remove unicode characters if any
-def post_process(keywords):
-    keywords1 = []
-    keywords2 = []
-    for j in range(0, len(keywords)):
-        if re.search(r' \\x.. ', repr(keywords[j][0])) is not None:
-            kstart = re.search(r' \\x.. ', repr(keywords[j][0])).start()
-            kend =re.search(r' \\x.. ', repr(keywords[j][0])).end()
-            start_phrase = repr(keywords[j][0])[1:kstart]
-            end_phrase = repr(keywords[j][0])[kend:-1]
-            keywords2.append(start_phrase)
-            keywords2.append(end_phrase)
-        else:
-            keywords1.append(keywords[j][0])
-
-    keywords = keywords1 + keywords2
-    keyword_limit = min(len(keywords), 15)
-    keyword_string = ""
-    for i in range(0, keyword_limit):
-        keywords[i] = re.sub(r'\\x..', "", repr(keywords[i]))
-        keyword_string = keyword_string + keywords[i] + " "
-    keyword_string = keyword_string.replace("'", '"')
-    return keyword_string
-    
-#module to process unicode text to string text
-def preprocess(infile):
-    pdf_string, page_no = convert(infile)
-    decoded_string = pdf_string.decode('utf-8', 'ignore')
-    normalized_string = unicodedata.normalize("NFKD", decoded_string)
-    final_string = normalized_string.encode('ascii', 'replace')
-    return rake_call(final_string, page_no)
-
-#module to perform google search
-def google_search(search_term, api_key, cse_id):
-    service = build("customsearch", "v1", developerKey=api_key)
-    res = service.cse().list(q=search_term, cx=cse_id).execute()
-    total_results = int(res['searchInformation']['totalResults'])
-    if total_results == 0:
-        return ""
-    else:
-        return res['items']
-
-for infile in glob.glob("*.pdf"):
-    print "Filename: ", infile
-    keyword_string = preprocess(infile)
-    print "Keywords: ", keyword_string
-    results = google_search(keyword_string, my_api_key, my_cse_id)
-    if results == "":
-        print "No results"
-    else:
-        print "Search Results:"
-        for result in results:
-            print(result['link'])
-    print "-------------------------------------------------------------"
-
-
-    
+if __name__=="__main__":
+	config = {
+        'host': 'localhost',
+        'port': 3306,
+        'database': 'testdb',
+        'user': 'root',
+        'password': 'Backspacebar@1',
+        'charset': 'utf8',
+        'use_unicode': True,
+        'get_warnings': True,
+    }
+	filename=sys.argv[1]
+	stopwordfile=sys.argv[2]
+	cnx = mysql.connector.connect(**config)
+	cursor = cnx.cursor()
+	now = datetime.datetime.now()
+	print(now.strftime("%Y-%m-%d %H:%M:%S"))
+	date = now.strftime("%Y-%m-%d %H:%M:%S")
+	while('true'):
+		for file in os.listdir(filename):
+			print(file)
+			
+			rake_object = rake.Rake(stopwordfile, 5, 5, 2)
+			path = filename + '\\' + file
+			print(path)
+			watermark = PdfFileReader(open(path, "rb"))
+			pdfdata=""
+			total=0
+			counter=0
+			for j in range(0, watermark.getNumPages()):
+				pdfdata=pdfdata+watermark.getPage(j).extractText()
+			print(len(pdfdata))
+			keywords = rake_object.run(pdfdata)
+			
+			keyword_limit = min(len(keywords), 5)
+			keywordAllData=""
+			i = keyword_limit
+			while i > 0:
+				print(keywords[i][0])
+				if not re.match(r'.*[\%\$\^\*\@\!\-\(\)\:\;\'\"\{\}\[\]].*', keywords[i][0]) :
+					keywordAllData=keywordAllData+"\""+keywords[i][0] +"\","
+				i = i -1
+			print(keywordAllData)
+			sql = "INSERT INTO FILE_METADATA(FILENAME,DATE, keywords) VALUES ('%s' , '%s' , '%s')" % (file, date , keywordAllData)
+			cursor.execute(sql)
+			id = cursor.lastrowid
+			print(id)
+			cnx.commit()
+			service = build("customsearch", "v1", developerKey=my_api_key)
+			res = service.cse().list(q=keywordAllData, cx=my_cse_id, filter='0').execute()
+			print('Top 10 google search urls are:-')
+			if (len(res) == 6):
+				for result in res['items']:
+					print(result['link'])
+					sql = "INSERT INTO URL(FILE_ID,URL_NAME) VALUES (%s , '%s')" % (id,result['link'])
+					cursor.execute(sql)
+					
+					cnx.commit()
+					counter=counter+1
+					if ("github.com/NeeluSingla8" in result['link']):
+						total = total +1
+			if (counter != 0) :
+				print("precison is :- " + str((total/counter)))
+				print("recall is :- " + str((total/max(total,counter))))
+			else :
+				print("precison is :- 0")
+				print("recall is :- 0")
+		print("going to run after 1 day")
+		time.sleep(24*3600)
